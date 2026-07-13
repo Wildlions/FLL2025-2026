@@ -1,0 +1,241 @@
+from pybricks.hubs import PrimeHub
+from pybricks.pupdevices import Motor, ColorSensor, UltrasonicSensor, ForceSensor
+from pybricks.parameters import Button, Color, Direction, Port, Side, Stop
+from pybricks.robotics import DriveBase
+from pybricks.tools import wait, StopWatch, multitask, run_task
+from umath import sin, cos, tan, pi
+
+tempo = StopWatch()   
+hub = PrimeHub()
+
+# Configuração de Motores e Sensores
+direito = Motor(Port.E)
+esquerdo = Motor(Port.A, Direction.COUNTERCLOCKWISE)
+garra_esq = Motor(Port.B, Direction.COUNTERCLOCKWISE)
+garra_dir = Motor(Port.F)
+
+# DriveBase Otimizada para FLL
+# Dica: Se o robô girar menos de 90°, aumente 104 para 105. Se girar mais, diminua para 103.
+mover = DriveBase(esquerdo, direito, 55, 104)
+mover.settings(400, 250)
+mover.use_gyro(True)
+
+numero = 1
+lancamento = 1
+hub.system.set_stop_button(Button.BLUETOOTH)
+
+# Variáveis de calibração para os sensores de cor
+whiteLow = 95
+whiteHigh = 100
+blacklow = 10
+blackhigh = 20
+kD = 0.972
+kP = 1.392
+erro_ant = 0
+
+# def lerE():
+#     return sensoresq.reflection()
+
+# def lerD():
+#     return sensordir.reflection()
+
+# --- FUNÇÕES DE MOVIMENTAÇÃO OTIMIZADAS ---
+
+def andar(distancia, velocidade = 400):
+    mover.settings(velocidade, 650, 100, 100)
+    mover.stop()
+    hub.imu.reset_heading(0)
+    mover.straight(distancia * 10)
+
+def curva(graus, esperar=True, velocidade = 150):
+    # Velocidade e aceleração angular reduzidas para evitar que as rodas derrapem
+    mover.settings(50, 600, 100, velocidade)
+    mover.turn(graus, Stop.HOLD, esperar)
+    if esperar:
+        wait(100) # Pausa milimétrica para o giroscópio estabilizar o valor real
+
+def arco(raio, graus, velocidade = 300):
+    mover.settings(velocidade, 400, 400, 400)
+    mover.curve(raio, graus)
+
+def parar():
+    mover.stop()
+    wait(1)
+
+def esperar(tempo):
+    mover.stop()
+    wait(tempo * 1000)
+    mover.stop()
+
+# --- FUNÇÕES DAS GARRAS (INDIVIDUAIS) ---
+
+def garraD(tempo, velocidade=4000, reverse=False, esperar=True):
+    velocidadeR = velocidade * (-1 if reverse else 1)
+    garra_dir.run_time(velocidadeR, tempo, wait=esperar)
+
+def garraE(tempo, velocidade=4000, reverse=False, esperar=True):
+    velocidadeR = velocidade * (-1 if reverse else 1)
+    garra_esq.run_time(velocidadeR, tempo, wait=esperar)
+
+# --- SISTEMA ASYNC: AJUSTE SIMULTÂNEO E REVERSÍVEL ---
+
+async def async_ajusteGarraE(velocidade, torque, reverso):
+    sinal = 1 if reverso else -1
+    await garra_esq.run_until_stalled(velocidade * sinal, Stop.COAST, torque)
+
+async def async_ajusteGarraD(velocidade, torque, reverso):
+    sinal = 1 if reverso else -1
+    await garra_dir.run_until_stalled(velocidade * sinal, Stop.COAST, torque)
+
+def ajusteGarrasJuntas(velocidade=4000, torque=50, esq_reverso=False, dir_reverso=False):
+    """
+    Executa o travamento de ambas as garras ao mesmo tempo.
+    Altere esq_reverso ou dir_reverso para True caso precise mudar o sentido de rotação.
+    """
+    run_task(multitask(
+        async_ajusteGarraE(velocidade, torque, esq_reverso), 
+        async_ajusteGarraD(velocidade, torque, dir_reverso)
+    ))
+
+# --- FUNÇÕES DE ALINHAMENTO / ESTACIONAR ---
+
+def estacionarB(velocidade):
+    loop = True
+    while loop == True:
+        refE = lerE()
+        refD = lerD()
+        mover.drive(velocidade, 0)
+        if (refD >= whiteLow and refD <= whiteHigh) or (refE >= whiteLow and refE <= whiteHigh):
+            parar()
+            loop = False
+
+def estacionarP(velocidade):
+    loop = True
+    while loop == True:
+        refE = lerE()
+        refD = lerD()
+        mover.drive(velocidade, 0)
+        if refD >= blacklow and refD <= blackhigh and refE >= blacklow and refE <= blackhigh:
+            mover.stop()
+            loop = False
+        else:
+            wait(1)
+
+def estacionarT(velocidade):
+    erro_ant = 0
+    taxaCurva = 0
+    while True:
+        refE = lerE()
+        refD = lerD()
+        erro = refD - refE
+        derivada = erro - (erro_ant * 0.3)
+        taxaCurva = (kP * erro) + (kD * derivada)
+        erro_ant = erro
+
+        if refE < blackhigh and refE > blacklow and refD < blackhigh and refD > blacklow:
+            mover.stop()
+            wait(500)
+            break
+        else:
+            mover.drive(velocidade, taxaCurva)
+            wait(10)
+
+async def estacionarE(velocidade, torque=50):
+    await esquerdo.run_until_stalled(velocidade, Stop.COAST, torque)
+
+async def estacionarD(velocidade, torque=50):
+    await direito.run_until_stalled(velocidade, Stop.COAST, torque)
+
+async def est(velocidade, torque=50):
+    await multitask(estacionarE(velocidade, torque), estacionarD(velocidade, torque))
+
+def estacionar(velocidade, torque=31):
+    run_task(est(velocidade, torque))
+    parar()
+
+async def set_timeout(tempo):
+    StopWatch.reset()
+
+# --- LOOP PRINCIPAL DO SELETOR DE LANÇAMENTOS ---
+
+while numero == 1:
+    hub.display.number(lancamento)
+    botao = hub.buttons.pressed()
+    
+    if Button.LEFT in botao: 
+        if lancamento == -99:
+            lancamento = -99
+            hub.display.number(lancamento)
+        else:
+            lancamento -= 1
+            hub.display.number(lancamento)
+            wait(250)
+    
+    if Button.RIGHT in botao:
+        if lancamento == 99:
+            lancamento = 99
+        else:
+            lancamento += 1
+            hub.display.number(lancamento)
+            wait(250)
+
+    if Button.CENTER in botao:
+        wait(300)
+
+        # LANÇAMENTO 0: Testes de bancada e bateria
+        if lancamento == 0:
+            print("Bateria: ", hub.battery.voltage())
+            hub.imu.reset_heading(0) 
+            mover.straight(100000)      
+            parar()
+
+        # LANÇAMENTO 1: Missão Principal Otimizada
+        if lancamento == 1:
+            hub.imu.reset_heading(0) 
+            
+            # Ajuste das garras juntas. Ajuste True/False conforme a mecânica do seu robô exigir:
+            ajusteGarrasJuntas(4000, 50, esq_reverso=False, dir_reverso=True)
+            
+            garra_esq.run_angle(1000, 140)
+            garra_esq.reset_angle(0)
+            
+            andar(60)
+            curva(-90) # Curva de 90 graus corrigida e estabilizada
+            
+            garraD(470, 4000, True, True)
+            curva(-40)
+            curva(80)
+            curva(-60)
+            andar(-15)
+            esperar(0.80)
+            andar(15)
+            garraD(300, 4000, False, True)
+            andar(-10, 300)
+            curva(70)
+            garraD(300, 4000, True, False)
+            garraE(550, -4000, True, False)
+            andar(15)
+            garraE(200, 4000, False, True)
+            garraD(300, 4000, False, True)
+            andar(-10)
+            curva(160)
+            andar(10)
+            garraD(470, 4000, True, True)
+            
+            parar()
+
+        # LANÇAMENTO 2: Exemplo de outra configuração de garras
+        if lancamento == 2:
+            hub.imu.reset_heading(0) 
+            
+            # Se no lançamento 2 você precisar que as duas garras girem ao contrário:
+            ajusteGarrasJuntas(4000, 50, esq_reverso=True, dir_reverso=False)
+            
+            garra_esq.run_angle(1000, 140)
+            garra_esq.reset_angle(0)
+            parar()
+
+        # LANÇAMENTO REVERSO -1
+        if lancamento == -1:
+            hub.imu.reset_heading(0)
+            curva(-92)
