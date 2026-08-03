@@ -1,0 +1,267 @@
+from pybricks.hubs import PrimeHub
+from pybricks.pupdevices import Motor, ColorSensor, UltrasonicSensor, ForceSensor
+from pybricks.parameters import Button, Color, Direction, Port, Side, Stop
+from pybricks.robotics import DriveBase
+from pybricks.tools import wait, StopWatch, multitask, run_task
+from umath import sin, cos, tan, pi
+
+tempo = StopWatch()   
+hub = PrimeHub()
+direito = Motor(Port.E)
+esquerdo = Motor(Port.A, Direction.COUNTERCLOCKWISE)
+garra_esq = Motor(Port.B, Direction.COUNTERCLOCKWISE)
+garra_dir = Motor(Port.F)
+mover = DriveBase(esquerdo, direito, 55, 104)
+mover.settings(400, 250)
+mover.use_gyro(True)
+numero = 1
+lancamento = 1
+hub.system.set_stop_button(Button.BLUETOOTH)
+whiteLow = 95
+whiteHigh = 100
+blacklow = 10
+blackhigh = 20
+kD = 0.972
+kP = 1.392
+erro_ant = 0
+
+#def lerE():
+    
+ # return(sensoresq.reflection())
+
+#def lerD():
+
+  #  return(sensordir.reflection())
+
+def andar(distancia, velocidade = 400):
+
+    mover.settings(velocidade, 650, 100, 100)
+    mover.stop()
+    hub.imu.reset_heading(0)
+    mover.straight(distancia*10)
+
+def curva(graus, esperar=True, velocidade = 200):
+
+    mover.settings(50, 600, 130, velocidade)
+    mover.turn(graus, Stop.HOLD, esperar)
+    
+def garraD(tempo, velocidade=4000, reverse=False, esperar=True):
+    velocidadeR = velocidade * (-1 if reverse else 1)
+    garra_dir.run_time(velocidadeR, tempo, wait=esperar)
+
+def garraE(tempo, velocidade=4000, reverse=False, esperar=True):
+    velocidadeR = velocidade * (-1 if reverse else 1)
+    garra_esq.run_time(velocidadeR, tempo, wait=esperar)
+
+def arco(raio, graus, velocidade = 300):
+
+    mover.settings(velocidade, 400, 400, 400)
+    mover.curve(raio, graus)
+
+def ajusteGarra(lado, velocidade=4000, torque=50):
+
+    if lado == "E":
+
+        garra_esq.run_until_stalled(velocidade * -1, Stop.COAST, torque)
+
+    if lado == "D":
+
+        garra_dir.run_until_stalled(velocidade * -1, Stop.COAST, torque)
+    
+    
+def esperar(tempo):
+    
+    mover.stop()
+    wait(tempo*1000)
+    mover.stop()
+
+def parar():
+
+    mover.stop()
+    wait(1)
+
+def estacionarB(velocidade):
+
+    loop = True
+
+    while loop == True:
+
+        refE = lerE()
+        refD = lerD()
+        mover.drive(velocidade, 0)
+
+        if refD >= whiteLow and refD <= whiteHigh:
+
+            parar()
+            loop = False
+
+        if refE >= whiteLow and refE <= whiteHigh:
+
+            parar()
+            loop = False
+
+def estacionarP(velocidade):
+
+    loop = True
+
+    while loop == True:
+
+        refE = lerE()
+        refD = lerD()
+        mover.drive(velocidade, 0)
+
+        if refD >= blacklow and refD <= blackhigh and refE >= blacklow and refE <= blackhigh:
+
+            mover.stop()
+            loop = False
+
+        else:
+
+            wait(1)
+
+def estacionarT(velocidade):
+
+    erro_ant = 0
+    taxaCurva = 0
+
+    while True:
+
+        refE = lerE()
+        refD = lerD()
+        erro = refD - refE
+        derivada = erro - (erro_ant * 0.3)
+        taxaCurva = (kP * erro) + (kD * derivada)
+        erro_ant = erro
+
+        if refE < blackhigh and refE > blacklow and refD < blackhigh and refD > blacklow:
+
+            mover.stop()
+            wait(500)
+            break
+
+        else:
+
+            mover.drive(velocidade, taxaCurva)
+            wait(10)
+
+async def estacionarE(velocidade, torque=50):
+
+    await esquerdo.run_until_stalled(velocidade, Stop.COAST, torque)
+
+async def estacionarD(velocidade, torque=50):
+
+    await direito.run_until_stalled(velocidade, Stop.COAST, torque)
+
+async def est(velocidade, torque=50):
+
+    await multitask(estacionarE(velocidade, torque), estacionarD(velocidade, torque))
+
+def estacionar(velocidade, torque=31):
+
+    run_task(est(velocidade, torque))
+    parar()
+
+async def set_timeout(tempo):
+
+    StopWatch.reset()
+
+while numero == 1:
+
+    hub.display.number(lancamento)
+    botao = hub.buttons.pressed()
+    
+    if Button.LEFT in botao: 
+
+        if lancamento == -99:
+
+            lancamento = -99
+            hub.display.number(lancamento)
+
+        else:
+
+            lancamento -= 1
+            hub.display.number(lancamento)
+            wait(250)
+    
+    if Button.RIGHT in botao:
+
+        if lancamento == 99:
+
+            lancamento = 99
+
+        else:
+
+            lancamento += 1
+            hub.display.number(lancamento)
+            wait(250)
+
+    if Button.CENTER in botao:
+        
+        wait(300)
+
+
+        if lancamento == 0:
+             print("Bateria: ", hub.battery.voltage())
+             hub.imu.reset_heading(0) 
+             mover.straight(100000)     
+              
+
+
+             parar()
+
+        if lancamento == 1:
+            #comando:Para ajustar a garra "E"
+            #ajusteGarra("E", 4000, 50)
+            #garra_esq.run_angle(1000, 110)
+            #garra_esq.reset_angle(0)
+            #comando:Para executar a garra fazendo outa ação ao mesmo tempo
+            #garraD(480, 4000, True, False)
+            hub.imu.reset_heading(0) 
+            ajusteGarra("D", -4000, 50)
+            ajusteGarra("E", 4000, 50)
+            garra_esq.run_angle(1000, 140)
+            garra_esq.reset_angle(0)
+            andar(60)
+            curva(-90)
+            andar(10)
+            andar(-10)
+            garraD(470, 4000, True, True)
+            curva(-40)
+            curva(80)
+            curva(-60)
+            andar(-10)
+            esperar(0.50)
+            andar(12)
+            garraD(300, 4000, False, True)
+            andar(-11, 300)
+            curva(61)
+            garraD(300, 4000, True, False)
+            garraE(550, -4000, True, False)
+            andar(19)
+            garraE(200, 4000, False, True)
+            garraD(300, 4000, False, True)
+            andar(-20)
+            curva(148)
+            garraD(470, 4000, True, True)
+            andar(-12)
+            garaE(300, 4000, True, True)
+            curva(48)
+            andar(60)
+            
+
+            parar()
+
+        
+        if lancamento == 2:
+            hub.imu.reset_heading(0) 
+            ajusteGarra("D", -4000, 50)
+            ajusteGarra("E", 4000, 50)
+            garra_esq.run_angle(1000, 140)
+            garra_esq.reset_angle(0)
+
+
+            parar()
+
+        if lancamento == -1:
+            hub.imu.reset_heading(0)
+            curva(-92)
